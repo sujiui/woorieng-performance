@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>수행실적 - (주)우리이앤지</title>
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="performance.css" />
+</head>
+
+<body>
+  <div class="app-container">
+
+    <main class="content-card">
+      <div class="toolbar">
+        <div class="category-tabs" id="tabs"></div>
+
+        <div class="search-wrapper">
+          <div class="search-container">
+            <input type="text" class="search-input" id="search" placeholder="공사명 또는 수요처 검색" autocomplete="off">
+            <i class="ph ph-magnifying-glass search-icon"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="results-count">전체 검색결과 <strong id="count">0</strong>건</div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>분야</th>
+              <th>공사명</th>
+              <th>수요처</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr>
+              <td colspan="4" class="loading-state">
+                <div class="spinner"></div>
+                <p>데이터를 불러오는 중입니다...</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination"></div>
+    </main>
+
+    <footer class="info-footer">
+      <i class="ph-duotone ph-info"></i>
+      <p>본 데이터는 실시간으로 연동되어 표시됩니다.</p>
+    </footer>
+
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbwk3Uu2LhfttzqQzCGNCscKvzDva_4eD-gbl3ZB9WiIOeHF1tdZHpgBicMLCHYu4BoG/exec";
+
+    const PER_PAGE = 20;
+    let allRecords = [];
+    let filtered = [];
+    let currentPage = 1;
+    let currentCategory = "전체";
+    let currentSearch = "";
+
+    const SHORT = {
+      "지하철, 철도": "지하철 · 철도",
+      "터널": "터널",
+      "연약지반": "연약지반",
+      "지반조사 용역, 진동소음계측, 재하시험, 사면조사": "지반 · 사면조사",
+      "가시설": "가시설",
+      "옹벽 교량계측, 자동화계측": "옹벽 · 교량계측"
+    };
+
+    const BADGE = {
+      "지하철, 철도": "",
+      "터널": "",
+      "연약지반": "",
+      "지반조사 용역, 진동소음계측, 재하시험, 사면조사": "",
+      "가시설": "",
+      "옹벽 교량계측, 자동화계측": ""
+    };
+
+    const ICONS = {
+      "전체": "ph-squares-four",
+      "지하철, 철도": "ph-train",
+      "터널": "ph-archway",
+      "연약지반": "ph-waves",
+      "지반조사 용역, 진동소음계측, 재하시험, 사면조사": "ph-magnifying-glass-plus",
+      "가시설": "ph-barricade",
+      "옹벽 교량계측, 자동화계측": "ph-bridge"
+    };
+
+    fetch(API_URL)
+      .then(res => res.json())
+      .then(data => {
+        allRecords = data.records || [];
+        buildTabs();
+        applyFilter();
+      })
+      .catch(err => {
+        document.getElementById("tbody").innerHTML = `
+          <tr><td colspan="4" class="empty-state">
+            <i class="ph-duotone ph-warning-circle"></i>
+            <p>데이터를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.</p>
+          </td></tr>
+        `;
+      });
+
+    function buildTabs() {
+      const cats = {};
+      allRecords.forEach(r => cats[r.category] = (cats[r.category] || 0) + 1);
+
+      let html = `
+        <button class="tab-btn active" data-cat="전체" onclick="selectTab(this)">
+          <i class="ph-bold ${ICONS['전체']}"></i> 전체
+          <span class="tab-count">${allRecords.length}</span>
+        </button>
+      `;
+
+      Object.keys(cats).forEach(cat => {
+        const iconClass = ICONS[cat] || "ph-folder";
+        html += `
+          <button class="tab-btn" data-cat="${cat}" onclick="selectTab(this)">
+            <i class="ph-bold ${iconClass}"></i> ${SHORT[cat] || cat}
+            <span class="tab-count">${cats[cat]}</span>
+          </button>
+        `;
+      });
+      document.getElementById("tabs").innerHTML = html;
+    }
+
+    window.selectTab = function (el) {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      el.classList.add("active");
+      currentCategory = el.getAttribute("data-cat");
+      currentPage = 1;
+      applyFilter();
+    }
+
+    const searchInput = document.getElementById("search");
+    searchInput.addEventListener("input", (e) => {
+      currentSearch = e.target.value.toLowerCase().trim();
+      currentPage = 1;
+      applyFilter();
+    });
+
+    function highlightText(text, query) {
+      if (!query) return text;
+      const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${safeQuery})`, "gi");
+      return text.replace(regex, '<span class="highlight">$1</span>');
+    }
+
+    function applyFilter() {
+      filtered = allRecords.filter(r => {
+        if (currentCategory !== "전체" && r.category !== currentCategory) return false;
+        if (currentSearch &&
+          !r.projectName.toLowerCase().includes(currentSearch) &&
+          !r.client.toLowerCase().includes(currentSearch)) return false;
+        return true;
+      });
+
+      document.getElementById("count").textContent = filtered.length;
+      renderTable();
+      renderPagination();
+    }
+
+    function renderTable() {
+      const start = (currentPage - 1) * PER_PAGE;
+      const paged = filtered.slice(start, start + PER_PAGE);
+
+      if (paged.length === 0) {
+        document.getElementById("tbody").innerHTML = `
+          <tr><td colspan="4" class="empty-state">
+            <i class="ph-duotone ph-magnifying-glass-minus"></i>
+            <p>조건에 맞는 실적이 없습니다.</p>
+          </td></tr>
+        `;
+        return;
+      }
+
+      let html = "";
+      paged.forEach((r, i) => {
+        const badgeCls = BADGE[r.category] || "";
+        const rowDelay = i * 0.03;
+        let projectName = highlightText(r.projectName, currentSearch);
+        let client = highlightText(r.client, currentSearch);
+
+        html += `
+          <tr style="animation-delay: ${rowDelay}s">
+            <td>${start + i + 1}</td>
+            <td><span class="badge ${badgeCls}">${SHORT[r.category] || r.category}</span></td>
+            <td>${projectName}</td>
+            <td>${client}</td>
+          </tr>
+        `;
+      });
+      document.getElementById("tbody").innerHTML = html;
+    }
+
+    function renderPagination() {
+      const total = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+      if (total <= 1) { document.getElementById("pagination").innerHTML = ""; return; }
+
+      let html = `
+        <button class="page-btn arrow" onclick="goPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+          <i class="ph-bold ph-caret-left"></i> 이전
+        </button>
+      `;
+
+      let startPage = Math.max(1, currentPage - 2);
+      let endPage = Math.min(total, startPage + 4);
+      if (endPage - startPage < 4) {
+        startPage = Math.max(1, endPage - 4);
+      }
+
+      for (let p = startPage; p <= endPage; p++) {
+        html += `
+          <button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="goPage(${p})">
+            ${p}
+          </button>
+        `;
+      }
+
+      html += `
+        <button class="page-btn arrow" onclick="goPage(${currentPage + 1})" ${currentPage === total ? 'disabled' : ''}>
+          다음 <i class="ph-bold ph-caret-right"></i>
+        </button>
+      `;
+
+      document.getElementById("pagination").innerHTML = html;
+    }
+
+    window.goPage = function (p) {
+      const total = Math.ceil(filtered.length / PER_PAGE);
+      if (p < 1 || p > total) return;
+      currentPage = p;
+      renderTable();
+      renderPagination();
+
+      const toolbarOffset = document.querySelector('.toolbar').offsetTop - 20;
+      window.scrollTo({ top: toolbarOffset, behavior: "smooth" });
+    }
+  </script>
+</body>
+
+</html>
